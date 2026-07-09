@@ -11,10 +11,10 @@ from pathlib import Path
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
-from astrbot.api.message_components import At
+import astrbot.api.message_components as Comp
 
 
-@register("dogtag", "KayYiny", "一个通用的 Dog Tag 插件，支持注册、管理个人信息和装备", "1.3.0", "https://github.com/KayYiny/astrbot-plugin-dogtag")
+@register("dogtag", "KayYiny", "一个通用的 Dog Tag 插件，支持注册、管理个人信息和装备", "1.3.3", "https://github.com/KayYiny/astrbot-plugin-dogtag")
 class Main(Star):
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
@@ -383,7 +383,7 @@ class Main(Star):
             return
         target_sid = None
         for comp in event.message_obj.message:
-            if isinstance(comp, At):
+            if isinstance(comp, Comp.At):
                 target_sid = str(comp.qq)
                 break
         if not target_sid:
@@ -393,7 +393,16 @@ class Main(Star):
         if not m:
             yield event.plain_result("❌ 请提供装备名字！使用方法：/送 @对方 <装备名>")
             return
-        yield event.plain_result(self._handle_gift(event, target_sid, m.group(1).strip()))
+        equip_name = m.group(1).strip()
+        result = self._handle_gift(event, target_sid, equip_name)
+        if result.startswith("❌"):
+            yield event.plain_result(result)
+            return
+        yield event.chain_result([
+            Comp.Plain(result + "\n"),
+            Comp.At(qq=target_sid),
+            Comp.Plain(f" 收到了一份礼物！「{equip_name}」\n使用 /同意 接受，或 /拒绝 拒绝"),
+        ])
 
     @filter.command("同意")
     async def accept_gift(self, event: AstrMessageEvent):
@@ -403,7 +412,7 @@ class Main(Star):
     async def reject_gift(self, event: AstrMessageEvent):
         yield event.plain_result(self._handle_reject(event))
 
-    @filter.command("信息")
+    @filter.command("狗牌")
     async def show_info(self, event: AstrMessageEvent):
         yield event.plain_result(self._handle_info(event))
 
@@ -415,7 +424,7 @@ class Main(Star):
             return
         target = None
         for comp in event.message_obj.message:
-            if isinstance(comp, At):
+            if isinstance(comp, Comp.At):
                 target = self._load_user_data(str(comp.qq))
                 break
         if not target:
@@ -452,7 +461,7 @@ class Main(Star):
 📋 三步开始
   1. 注册：/注册 <名字>
   2. 生日：/生日 2020.05.15
-  3. 查看：/信息
+  3. 查看：/狗牌
 
 🎒 装备
   /装备 <名字>  佩戴
@@ -473,7 +482,7 @@ class Main(Star):
 📝 个人信息
   /改名 <新名字>  改名
   /生日 yyyy.mm.dd  设置生日
-  /信息          查看卡片
+  /狗牌          查看狗牌
 
 🎒 装备
   /装备 <名字>  佩戴
