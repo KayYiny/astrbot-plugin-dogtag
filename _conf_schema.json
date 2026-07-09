@@ -28,5 +28,17 @@
         "title": "名字最大长度",
         "description": "名字最大字符数。",
         "default": 20
+    },
+    "max_equipment": {
+        "type": "int",
+        "title": "最大装备数量",
+        "description": "同时佩戴装备数量上限（0 为无上限）。",
+        "default": 0
+    },
+    "max_equip_name_length": {
+        "type": "int",
+        "title": "装备名字最大长度",
+        "description": "装备名字最大字符数。",
+        "default": 6
     }
 }
