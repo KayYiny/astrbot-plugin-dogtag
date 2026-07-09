@@ -1,0 +1,32 @@
+{
+    "allow_group_register": {
+        "type": "bool",
+        "title": "允许群聊注册和管理",
+        "description": "开启后允许在群聊中使用注册、改名、设置生日等原本仅限私聊的功能。",
+        "default": false
+    },
+    "show_register_tips": {
+        "type": "bool",
+        "title": "显示注册提示",
+        "description": "未注册用户使用命令时是否显示注册提示信息。",
+        "default": true
+    },
+    "birthday_reminder_enabled": {
+        "type": "bool",
+        "title": "启用生日提醒",
+        "description": "生日当天在信息卡片显示祝福。",
+        "default": true
+    },
+    "custom_name_prefix": {
+        "type": "string",
+        "title": "自定义名字前缀",
+        "description": "显示名字时添加的统一前缀。",
+        "default": ""
+    },
+    "max_name_length": {
+        "type": "int",
+        "title": "名字最大长度",
+        "description": "名字最大字符数。",
+        "default": 20
+    }
+}
