@@ -1,5 +1,5 @@
 name: Dog Tag 插件
-desc: "Dog Tag 插件，支持注册、管理个人信息和装备。用户可以创建自己的狗牌身份，设置生日，佩戴/取下装备并自动计时。"
-version: v1.1.0
+desc: "Dog Tag 插件，支持注册、管理个人信息和装备。用户可以创建自己的狗牌身份，设置生日，佩戴/取下/回溯装备，支持装备赠送。"
+version: v1.2.0
 author: KayYiny
 repo: https://github.com/KayYiny/astrbot-plugin-dogtag

@@ -5,15 +5,16 @@ Dog Tag 插件 for AstrBot
 
 import re
 import json
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
+from astrbot.api.message_components import At
 
 
-@register("dogtag", "KayYiny", "Dog Tag 插件，支持注册、管理个人信息和装备", "1.1.0", "https://github.com/KayYiny/astrbot-plugin-dogtag")
+@register("dogtag", "KayYiny", "Dog Tag 插件，支持注册、管理个人信息和装备", "1.2.0", "https://github.com/KayYiny/astrbot-plugin-dogtag")
 class Main(Star):
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
@@ -82,23 +83,18 @@ class Main(Star):
             return False
 
     def _format_duration(self, seconds: int) -> str:
-        if seconds < 0:
-            seconds = 0
+        if seconds < 0: seconds = 0
         m, s = divmod(seconds, 60)
         h, m = divmod(m, 60)
         d, h = divmod(h, 24)
         if d >= 365:
-            y = d // 365
-            r = d % 365
-            mo = r // 30
+            y = d // 365; r = d % 365; mo = r // 30
             return f"{y}年{mo}月" if r % 30 else f"{y}年"
         if d >= 30:
-            mo = d // 30
-            r = d % 30
+            mo = d // 30; r = d % 30
             return f"{mo}月{r}天" if r else f"{mo}月"
         if d >= 7:
-            w = d // 7
-            r = d % 7
+            w = d // 7; r = d % 7
             return f"{w}周{r}天" if r else f"{w}周"
         parts = []
         if d: parts.append(f"{d}天")
@@ -106,6 +102,13 @@ class Main(Star):
         if m: parts.append(f"{m}分")
         if s or not parts: parts.append(f"{s}秒")
         return "".join(parts)
+
+    def _parse_duration(self, text: str):
+        units = {'天': 86400, '日': 86400, '小时': 3600, '时': 3600, '分': 60, '分钟': 60, '秒': 1}
+        total = 0
+        for match in re.finditer(r'(\d+)\s*(天|日|小时|时|分|分钟|秒)', text):
+            total += int(match.group(1)) * units.get(match.group(2), 0)
+        return total if total > 0 else None
 
     def _handle_register(self, event: AstrMessageEvent, input_name: str) -> str:
         if not self._is_operation_allowed(event):
@@ -124,7 +127,7 @@ class Main(Star):
         user_data = {
             "id": sid, "name": nick, "display_name": display_name,
             "birthday": None, "register_date": datetime.now().strftime("%Y-%m-%d"),
-            "equipment": {}, "equipment_history": {}
+            "equipment": {}, "equipment_history": {}, "pending_gift": None
         }
         self._save_user_data(sid, user_data)
         return f"✅ 注册成功！欢迎你，{display_name}！🐶"
@@ -164,10 +167,11 @@ class Main(Star):
         for name, info in equipment.items():
             try:
                 dur = int((datetime.now() - datetime.fromisoformat(info['start_time'])).total_seconds())
-                dur_str = self._format_duration(dur)
+                ds = self._format_duration(dur)
             except Exception:
-                dur_str = "计时中"
-            lines.append(f"  {name}（{dur_str}）")
+                ds = "计时中"
+            from_txt = f" 来自{info['from']}" if info.get('from') else ""
+            lines.append(f"  {name}（{ds}）{from_txt}")
         return "\n".join(lines)
 
     def _handle_equip(self, event: AstrMessageEvent, equip_name: str) -> str:
@@ -213,6 +217,81 @@ class Main(Star):
         self._save_user_data(sid, user_data)
         return msg
 
+    def _handle_backdate(self, event: AstrMessageEvent, equip_name: str, duration_text: str) -> str:
+        r = self._require_registered(event)
+        if r[0] is None: return r[1]
+        sid, user_data = r
+        if not equip_name or not equip_name.strip():
+            return "❌ 请提供装备名字！使用方法：/装备补时 <装备名> <时长>"
+        equip_name = equip_name.strip()
+        if len(equip_name) > self._get_config_value("max_equip_name_length", 6):
+            return f"❌ 装备名字太长了！最多 {self._get_config_value('max_equip_name_length', 6)} 个字符。"
+        seconds = self._parse_duration(duration_text)
+        if seconds is None:
+            return "❌ 时长格式无效！例如：/装备补时 手表 5天"
+        start = (datetime.now() - timedelta(seconds=seconds)).isoformat()
+        is_new = equip_name not in user_data.get('equipment', {})
+        user_data['equipment'][equip_name] = {"start_time": start}
+        self._save_user_data(sid, user_data)
+        ds = self._format_duration(seconds)
+        if is_new:
+            return f"✅ 已装备「{equip_name}」，补时 {ds}！⏱️"
+        return f"✅ 已将「{equip_name}」的时长调整为 {ds}！⏱️"
+
+    def _handle_gift(self, event: AstrMessageEvent, target_sid: str, equip_name: str) -> str:
+        sid = event.get_sender_id()
+        sender = self._load_user_data(sid)
+        if not sender:
+            return "❌ 你还没有注册狗牌哦"
+        if len(equip_name) > self._get_config_value("max_equip_name_length", 6):
+            return f"❌ 装备名字太长了！最多 {self._get_config_value('max_equip_name_length', 6)} 个字符。"
+        target = self._load_user_data(target_sid)
+        if not target:
+            return "❌ 对方还没有注册狗牌哦"
+        if target.get('pending_gift'):
+            return "❌ 对方已有待确认的赠送请求，请等 Ta 处理完再送"
+        sender_name = sender.get('display_name') or sender.get('name', sid)
+        target['pending_gift'] = {
+            "from_sid": sid, "from_name": sender_name,
+            "equip_name": equip_name, "timestamp": datetime.now().isoformat()
+        }
+        self._save_user_data(target_sid, target)
+        return f"✅ 已送出「{equip_name}」给 {target.get('display_name', '对方')}，等待对方确认中..."
+
+    def _handle_accept(self, event: AstrMessageEvent) -> str:
+        r = self._require_registered(event)
+        if r[0] is None: return r[1]
+        sid, user_data = r
+        gift = user_data.get('pending_gift')
+        if not gift:
+            return "❌ 你目前没有待确认的赠送请求"
+        en, fn = gift['equip_name'], gift['from_name']
+        if en in user_data.get('equipment', {}):
+            del user_data['pending_gift']
+            self._save_user_data(sid, user_data)
+            return f"❌ 你已经有了「{en}」，无法接受重复装备"
+        max_e = self._get_config_value("max_equipment", 0)
+        if max_e > 0 and len(user_data.get('equipment', {})) >= max_e:
+            del user_data['pending_gift']
+            self._save_user_data(sid, user_data)
+            return "❌ 你的装备位已满，无法接受"
+        user_data['equipment'][en] = {"start_time": datetime.now().isoformat(), "from": fn}
+        del user_data['pending_gift']
+        self._save_user_data(sid, user_data)
+        return f"✅ 你接受了 {fn} 的「{en}」！"
+
+    def _handle_reject(self, event: AstrMessageEvent) -> str:
+        r = self._require_registered(event)
+        if r[0] is None: return r[1]
+        sid, user_data = r
+        gift = user_data.get('pending_gift')
+        if not gift:
+            return "❌ 你目前没有待确认的赠送请求"
+        en, fn = gift['equip_name'], gift['from_name']
+        del user_data['pending_gift']
+        self._save_user_data(sid, user_data)
+        return f"❌ 你拒绝了 {fn} 的「{en}」"
+
     def _handle_info(self, event: AstrMessageEvent) -> str:
         r = self._require_registered(event)
         if r[0] is None: return r[1]
@@ -232,7 +311,8 @@ class Main(Star):
                 ds = self._format_duration(dur)
             except Exception:
                 ds = "计时中"
-            equip.append(f"        {en}（{ds}）")
+            from_txt = f" 来自{ei['from']}" if ei.get('from') else ""
+            equip.append(f"        {en}（{ds}）{from_txt}")
         eq_txt = "\n" + "\n".join(equip) if equip else "（无）"
         return f"""🐶 狗牌信息 🐶
 ━━━━━━━━━━━━━━━
@@ -284,6 +364,42 @@ class Main(Star):
             return
         yield event.plain_result(self._handle_unequip(event, parts[1].strip()))
 
+    @filter.command("装备补时")
+    async def backdate(self, event: AstrMessageEvent):
+        parts = event.message_str.split(maxsplit=2)
+        if len(parts) < 3:
+            yield event.plain_result("❌ 使用方法：/装备补时 <装备名> <时长>（例如：/装备补时 手表 5天）")
+            return
+        yield event.plain_result(self._handle_backdate(event, parts[1].strip(), parts[2].strip()))
+
+    @filter.command("送")
+    async def send_gift(self, event: AstrMessageEvent):
+        parts = event.message_str.split(maxsplit=1)
+        if len(parts) < 2:
+            yield event.plain_result("❌ 使用方法：/送 @对方 <装备名>（例如：/送 @小B 手表）")
+            return
+        target_sid = None
+        for comp in event.message_obj.message:
+            if isinstance(comp, At):
+                target_sid = str(comp.qq)
+                break
+        if not target_sid:
+            yield event.plain_result("❌ 请 @ 要赠送的群友")
+            return
+        m = re.search(r'@\S+\s+(.+)', parts[1])
+        if not m:
+            yield event.plain_result("❌ 请提供装备名字！使用方法：/送 @对方 <装备名>")
+            return
+        yield event.plain_result(self._handle_gift(event, target_sid, m.group(1).strip()))
+
+    @filter.command("同意")
+    async def accept_gift(self, event: AstrMessageEvent):
+        yield event.plain_result(self._handle_accept(event))
+
+    @filter.command("拒绝")
+    async def reject_gift(self, event: AstrMessageEvent):
+        yield event.plain_result(self._handle_reject(event))
+
     @filter.command("我的信息")
     async def show_info(self, event: AstrMessageEvent):
         yield event.plain_result(self._handle_info(event))
@@ -303,7 +419,13 @@ class Main(Star):
 🎒 装备
   /装备 <名字>  佩戴
   /装备          查看当前
-  /取下装备 <名字>  取下""")
+  /取下装备 <名字>  取下
+  /装备补时 <名> <时长>  回溯时长
+
+🎁 赠送
+  /送 @对方 <装备名>  赠送
+  /同意          接受
+  /拒绝          拒绝""")
         else:
             yield event.plain_result(f"""🐶 {ud.get('display_name', '未知')} 的操作指南
 
@@ -315,7 +437,13 @@ class Main(Star):
 🎒 装备
   /装备 <名字>  佩戴
   /装备          查看当前
-  /取下装备 <名字>  取下""")
+  /取下装备 <名字>  取下
+  /装备补时 <名> <时长>  回溯时长
+
+🎁 赠送
+  /送 @对方 <装备名>  赠送
+  /同意          接受
+  /拒绝          拒绝""")
 
     async def terminate(self):
         logger.info("Dog Tag 插件已卸载")
