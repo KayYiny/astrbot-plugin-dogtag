@@ -1,10 +1,4 @@
 {
-    "allow_group_register": {
-        "type": "bool",
-        "title": "允许群聊注册和管理",
-        "description": "开启后允许在群聊中使用注册、改名、设置生日等原本仅限私聊的功能。",
-        "default": false
-    },
     "show_register_tips": {
         "type": "bool",
         "title": "显示注册提示",

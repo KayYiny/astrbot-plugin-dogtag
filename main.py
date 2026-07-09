@@ -14,7 +14,7 @@ from astrbot.api import logger, AstrBotConfig
 from astrbot.api.message_components import At
 
 
-@register("dogtag", "KayYiny", "Dog Tag 插件，支持注册、管理个人信息和装备", "1.2.0", "https://github.com/KayYiny/astrbot-plugin-dogtag")
+@register("dogtag", "KayYiny", "一个通用的 Dog Tag 插件，支持注册、管理个人信息和装备", "1.3.0", "https://github.com/KayYiny/astrbot-plugin-dogtag")
 class Main(Star):
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
@@ -25,14 +25,6 @@ class Main(Star):
 
     def _get_config_value(self, key: str, default):
         return self.config.get(key, default)
-
-    def _is_operation_allowed(self, event: AstrMessageEvent) -> bool:
-        if self._get_config_value("allow_group_register", False):
-            return True
-        return event.is_private_chat()
-
-    def _get_private_error_msg(self) -> str:
-        return "❌ 此操作只能在私聊环境中使用！可以联系管理员在配置中开启群聊权限。"
 
     def _get_user_file(self, sid: str) -> Path:
         safe_sid = re.sub(r'[^a-zA-Z0-9_]', '_', sid)
@@ -52,33 +44,46 @@ class Main(Star):
             json.dump(data, f, ensure_ascii=False, indent=2)
         temp_file.replace(user_file)
 
+    def _find_user_by_name(self, name: str):
+        name = name.strip()
+        for f in self.data_dir.glob("*.json"):
+            try:
+                d = json.load(open(f, 'r', encoding='utf-8'))
+                if d.get('name') == name:
+                    return d
+            except Exception:
+                continue
+        return None
+
     def _require_registered(self, event: AstrMessageEvent):
-        if not self._is_operation_allowed(event):
-            return None, self._get_private_error_msg()
         sid = event.get_sender_id()
         user_data = self._load_user_data(sid)
         if not user_data:
             if self._get_config_value("show_register_tips", True):
                 return None, "❌ 你还没有注册！请先使用 /注册 <名字> 进行注册。"
             return None, "❌ 你还没有注册！"
+        nick = event.get_sender_name()
+        if nick and user_data.get('name') != nick:
+            user_data['name'] = nick
+            self._save_user_data(sid, user_data)
         return sid, user_data
 
     def _calculate_age(self, birthday_str: str) -> str:
         try:
-            birth_date = datetime.strptime(birthday_str, "%Y.%m.%d").date()
+            bd = datetime.strptime(birthday_str, "%Y.%m.%d").date()
             today = date.today()
-            age_years = today.year - birth_date.year
-            if (today.month, today.day) < (birth_date.month, birth_date.day):
-                age_years -= 1
-            return f"{age_years}岁"
+            y = today.year - bd.year
+            if (today.month, today.day) < (bd.month, bd.day):
+                y -= 1
+            return f"{y}岁"
         except Exception:
             return "未设置"
 
     def _is_birthday_today(self, birthday_str: str) -> bool:
         try:
-            birth_date = datetime.strptime(birthday_str, "%Y.%m.%d").date()
+            bd = datetime.strptime(birthday_str, "%Y.%m.%d").date()
             today = date.today()
-            return (birth_date.month, birth_date.day) == (today.month, today.day)
+            return (bd.month, bd.day) == (today.month, today.day)
         except Exception:
             return False
 
@@ -111,8 +116,6 @@ class Main(Star):
         return total if total > 0 else None
 
     def _handle_register(self, event: AstrMessageEvent, input_name: str) -> str:
-        if not self._is_operation_allowed(event):
-            return self._get_private_error_msg()
         sid = event.get_sender_id()
         if self._load_user_data(sid):
             return "❌ 你已经注册过了！可以使用 /改名 来修改名字。"
@@ -197,7 +200,7 @@ class Main(Star):
         if r[0] is None: return r[1]
         sid, user_data = r
         if not equip_name or not equip_name.strip():
-            return "❌ 请提供装备名字！使用方法：/取下装备 <装备名字>"
+            return "❌ 请提供装备名字！使用方法：/取下 <装备名字>"
         equip_name = equip_name.strip()
         if equip_name not in user_data.get('equipment', {}):
             return f"❌ 你得先带上「{equip_name}」哟！"
@@ -336,11 +339,11 @@ class Main(Star):
             return
         yield event.plain_result(self._handle_rename(event, parts[1].strip()))
 
-    @filter.command("我的诞生日")
+    @filter.command("生日")
     async def set_birthday(self, event: AstrMessageEvent):
         parts = event.message_str.split(maxsplit=1)
         if len(parts) < 2:
-            yield event.plain_result("❌ 请提供生日！使用方法：/我的诞生日 yyyy.mm.dd")
+            yield event.plain_result("❌ 请提供生日！使用方法：/生日 yyyy.mm.dd")
             return
         yield event.plain_result(self._handle_birthday(event, parts[1].strip()))
 
@@ -356,11 +359,11 @@ class Main(Star):
             return
         yield event.plain_result(self._handle_equip(event, parts[1].strip()))
 
-    @filter.command("取下装备")
+    @filter.command("取下")
     async def unequip(self, event: AstrMessageEvent):
         parts = event.message_str.split(maxsplit=1)
         if len(parts) < 2:
-            yield event.plain_result("❌ 请提供装备名字！使用方法：/取下装备 <装备名字>")
+            yield event.plain_result("❌ 请提供装备名字！使用方法：/取下 <装备名字>")
             return
         yield event.plain_result(self._handle_unequip(event, parts[1].strip()))
 
@@ -400,11 +403,46 @@ class Main(Star):
     async def reject_gift(self, event: AstrMessageEvent):
         yield event.plain_result(self._handle_reject(event))
 
-    @filter.command("我的信息")
+    @filter.command("信息")
     async def show_info(self, event: AstrMessageEvent):
         yield event.plain_result(self._handle_info(event))
 
-    @filter.command("帮助")
+    @filter.command("看")
+    async def view_other(self, event: AstrMessageEvent):
+        parts = event.message_str.split(maxsplit=1)
+        if len(parts) < 2:
+            yield event.plain_result("❌ 请指定要查看的群友，例如：/看 @小B")
+            return
+        target = None
+        for comp in event.message_obj.message:
+            if isinstance(comp, At):
+                target = self._load_user_data(str(comp.qq))
+                break
+        if not target:
+            m = re.search(r'@(.+)', parts[1])
+            if m:
+                target = self._find_user_by_name(m.group(1).strip())
+        if not target:
+            yield event.plain_result("❌ 没有找到该群友的狗牌哦")
+            return
+        dn = target.get('display_name') or target.get('name', '未知')
+        eq = target.get('equipment', {})
+        if eq:
+            ep = []
+            for en, ei in eq.items():
+                try:
+                    dur = int((datetime.now() - datetime.fromisoformat(ei['start_time'])).total_seconds())
+                    ds = self._format_duration(dur)
+                except Exception:
+                    ds = "计时中"
+                from_txt = f" 来自{ei['from']}" if ei.get('from') else ""
+                ep.append(f"{en}（{ds}）{from_txt}")
+            eq_txt = " ".join(ep)
+        else:
+            eq_txt = "（无）"
+        yield event.plain_result(f"🐶 {dn} 🎒 {eq_txt}")
+
+    @filter.command("狗牌帮助")
     async def help(self, event: AstrMessageEvent):
         sid = event.get_sender_id()
         ud = self._load_user_data(sid)
@@ -413,37 +451,43 @@ class Main(Star):
 
 📋 三步开始
   1. 注册：/注册 <名字>
-  2. 生日：/我的诞生日 2020.05.15
-  3. 查看：/我的信息
+  2. 生日：/生日 2020.05.15
+  3. 查看：/信息
 
 🎒 装备
   /装备 <名字>  佩戴
   /装备          查看当前
-  /取下装备 <名字>  取下
+  /取下 <名字>  取下
   /装备补时 <名> <时长>  回溯时长
 
 🎁 赠送
   /送 @对方 <装备名>  赠送
   /同意          接受
-  /拒绝          拒绝""")
+  /拒绝          拒绝
+
+👀 互动
+  /看 @群友  查看对方狗牌""")
         else:
             yield event.plain_result(f"""🐶 {ud.get('display_name', '未知')} 的操作指南
 
 📝 个人信息
   /改名 <新名字>  改名
-  /我的诞生日 yyyy.mm.dd  设置生日
-  /我的信息      查看卡片
+  /生日 yyyy.mm.dd  设置生日
+  /信息          查看卡片
 
 🎒 装备
   /装备 <名字>  佩戴
   /装备          查看当前
-  /取下装备 <名字>  取下
+  /取下 <名字>  取下
   /装备补时 <名> <时长>  回溯时长
 
 🎁 赠送
   /送 @对方 <装备名>  赠送
   /同意          接受
-  /拒绝          拒绝""")
+  /拒绝          拒绝
+
+👀 互动
+  /看 @群友  查看对方狗牌""")
 
     async def terminate(self):
         logger.info("Dog Tag 插件已卸载")
